@@ -995,6 +995,12 @@ impl Host {
         // SAFETY: a plain query.
         adapter.map_or(0, |a| unsafe { a.CheckInterfaceSupport(&IDXGIDevice::IID) }.unwrap_or(0))
     }
+
+    #[cfg(test)]
+    pub(crate) fn timestamp_frequency(&self) -> Option<u64> {
+        // SAFETY: plain query on a live command queue.
+        unsafe { self.queue.GetTimestampFrequency() }.ok()
+    }
 }
 
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
