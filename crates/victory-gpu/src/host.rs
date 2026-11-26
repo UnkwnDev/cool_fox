@@ -940,6 +940,17 @@ fn create() -> windows::core::Result<Host> {
             let amd = crate::indirect::amd(&device);
             victory_shader::emit::set_host_rdna(amd && o1.WaveLaneCountMin == 32 && o1.WaveLaneCountMax == 64);
         }
+        let mut o0 = D3D12_FEATURE_DATA_D3D12_OPTIONS::default();
+        let doubles = device
+            .CheckFeatureSupport(
+                D3D12_FEATURE_D3D12_OPTIONS,
+                (&raw mut o0).cast(),
+                size_of_val(&o0) as u32,
+            )
+            .is_ok()
+            && o0.DoublePrecisionFloatShaderOps.as_bool();
+        tracing::info!(doubles, "host double-precision float shader ops");
+        victory_shader::emit::set_host_doubles(doubles);
         let messages = debug
             .then(|| device.cast::<ID3D12InfoQueue>().ok())
             .flatten();
