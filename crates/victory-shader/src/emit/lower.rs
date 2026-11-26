@@ -20,6 +20,11 @@ use crate::native::{HwStage, NativeProgram, ResourceType, RootType, StageIo, Usa
 use crate::resource::{Address, CODE, MEMORY, Resources, Role, Site, Source};
 use crate::structure::{Atom, Bool, LaneExit, Structured};
 
+/// Packed dot-product lowering (`v_dot*`), a child module so it shares the
+/// emitter's state without growing this file.
+#[path = "dot.rs"]
+mod dot;
+
 /// The ray-tracing node test (`image_bvh_intersect_ray`), a child module so
 /// it shares the emitter's state.
 #[path = "intersect.rs"]
@@ -7923,6 +7928,9 @@ impl<'a> Lower<'a> {
         if let Some(op) = name.strip_prefix("v_pk_") {
             return self.packed16(inst, op, guard);
         }
+        if name.starts_with("v_dot") {
+            return self.dot_product(inst, name, guard);
+        }
         match name {
             "v_mad_u64_u32" => {
                 // a * b + c, c and the result 64 bits wide; the carry out
@@ -8102,61 +8110,6 @@ impl<'a> Lower<'a> {
                 let r = self
                     .s
                     .op(c, "unaryBits.i32", Attr::ReadNone, self.s.t.i32, op, &[a]);
-                int(self, r)
-            }
-            "v_dot4c_i32_i8" => {
-                // D += the dot product of four signed bytes, wrapping: DXIL's
-                // Dot4AddI8Packed.
-                let (a, bb) = (s(self, 0)?, s(self, 1)?);
-                let Some(Operand::Vector { reg, .. }) = v.dst else {
-                    return Err("an accumulator");
-                };
-                let acc = self.i32_of(inst.read(Reg::V(reg)).ok_or("an accumulator")?)?;
-                let i32_ty = self.s.t.i32;
-                let r = self.s.op(
-                    c,
-                    "dot4AddPacked.i32",
-                    Attr::ReadNone,
-                    i32_ty,
-                    163,
-                    &[acc, a, bb],
-                );
-                int(self, r)
-            }
-            "v_dot4_i32_i8" => {
-                // VOP3P: op_sel picks the half each multiplicand's low half
-                // reads, op_sel_hi its high half's; the accumulator is read
-                // whole (as AMD's compilers fold constants into it).
-                if v.clamp || v.neg_hi != 0 {
-                    return Err("a saturating or negated dot product");
-                }
-                let mut xs = Vec::new();
-                for k in 0..2 {
-                    let x = s(self, k)?;
-                    let (lo, hi) = (v.opsel >> k & 1 != 0, v.opsel_hi >> k & 1 != 0);
-                    if (lo, hi) == (false, true) {
-                        xs.push(x);
-                        continue;
-                    }
-                    let (k16, low) = (self.s.m.i32(16), self.s.m.i32(0xFFFF));
-                    let top = self.s.m.bin(c, Bin::LShr, x, k16);
-                    let bottom = self.s.m.bin(c, Bin::And, x, low);
-                    let hi = self
-                        .s
-                        .m
-                        .bin(c, Bin::Shl, if hi { top } else { bottom }, k16);
-                    xs.push(self.s.m.bin(c, Bin::Or, if lo { top } else { bottom }, hi));
-                }
-                let acc = s(self, 2)?;
-                let i32_ty = self.s.t.i32;
-                let r = self.s.op(
-                    c,
-                    "dot4AddPacked.i32",
-                    Attr::ReadNone,
-                    i32_ty,
-                    163,
-                    &[acc, xs[0], xs[1]],
-                );
                 int(self, r)
             }
             "v_mov_b32" => {
